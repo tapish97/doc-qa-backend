@@ -14,7 +14,6 @@ import os
 import shutil
 import time
 import gc
-import psutil
 
 # Load environment variables
 load_dotenv()
