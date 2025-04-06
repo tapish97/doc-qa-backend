@@ -9,6 +9,12 @@ from uuid import uuid4
 from dotenv import load_dotenv
 import os
 from pydantic import BaseModel
+from uuid import uuid4
+import os
+import shutil
+import time
+import gc
+import psutil
 
 # Load environment variables
 load_dotenv()
@@ -28,30 +34,31 @@ embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # Store user sessions
 sessions = {}  # {session_id: vector_db}
+
 @app.get("/wake-up")
 def wake_up():
     return {"status": "Backend is awake!"}
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """ Uploads and processes a PDF file, creating a session-specific vector store. """
-    
-    session_id = str(uuid4())  # Generate unique session ID
+async def upload_file(file: UploadFile = File(...), session_id: str = None):
+    """
+    Uploads and processes a PDF file.
+    If session_id is provided and exists, it overwrites the session in memory.
+    Otherwise, creates a new session.
+    """
+
+    # Generate a new session if one isn't passed
+    if not session_id or session_id not in sessions:
+        session_id = str(uuid4())
 
     try:
-        # Read PDF content
-        contents = await file.read()
+        # Read and extract PDF text
+        file.file.seek(0)
         reader = PdfReader(file.file)
-
-        # Extract text from all pages
-        text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text
+        text = "".join(page.extract_text() or "" for page in reader.pages)
 
         if not text.strip():
-            raise HTTPException(status_code=400, detail="No extractable text found in PDF. Please upload a text-based PDF.")
+            raise HTTPException(status_code=400, detail="No extractable text found in PDF.")
 
         # Split text into chunks
         text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
@@ -60,23 +67,24 @@ async def upload_file(file: UploadFile = File(...)):
         if not chunks:
             raise HTTPException(status_code=400, detail="Text extraction succeeded, but chunking failed.")
 
-        # Create persistent vector store
-        persist_dir = f"./chroma_data/{session_id}"
-        os.makedirs(persist_dir, exist_ok=True)
-
+        # Create an in-memory vector store (no persist_directory = no file locking)
         vector_db = Chroma.from_texts(
             texts=chunks,
             embedding=embeddings,
-            collection_name=f"docs_{session_id}",
-            persist_directory=persist_dir
+            collection_name=f"docs_{session_id}"
         )
 
+        # Overwrite or register in-memory session
         sessions[session_id] = vector_db
 
-        return {"session_id": session_id, "message": f"Processed {len(chunks)} chunks"}
+        return {
+            "session_id": session_id,
+            "message": f"Processed {len(chunks)} chunks"
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 class QuestionRequest(BaseModel):
