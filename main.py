@@ -28,6 +28,9 @@ embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # Store user sessions
 sessions = {}  # {session_id: vector_db}
+@app.get("/wake-up")
+def wake_up():
+    return {"status": "Backend is awake!"}
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
